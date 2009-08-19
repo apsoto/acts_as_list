@@ -42,7 +42,7 @@ module ActiveRecord
                 if #{configuration[:scope].to_s}.nil?
                   "#{configuration[:scope].to_s} IS NULL"
                 else
-                  "#{configuration[:scope].to_s} = \#{#{configuration[:scope].to_s}}"
+                  ["#{configuration[:scope].to_s} = ?", #{configuration[:scope].to_s}]
                 end
               end
             )
@@ -51,6 +51,12 @@ module ActiveRecord
           end
 
           class_eval <<-EOV
+            def self.with_acts_as_list_scope(scope_conditions)
+              with_scope :find => {:conditions => scope_conditions}  do
+                yield
+              end
+            end
+
             include ActiveRecord::Acts::List::InstanceMethods
 
             def acts_as_list_class
@@ -154,17 +160,21 @@ module ActiveRecord
         # Return the next higher item in the list.
         def higher_item
           return nil unless in_list?
-          acts_as_list_class.find(:first, :conditions =>
-            "#{scope_condition} AND #{position_column} = #{(send(position_column).to_i - 1).to_s}"
-          )
+          acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+            acts_as_list_class.find(:first, :conditions =>
+              "#{position_column} = #{(send(position_column).to_i - 1).to_s}"
+            )
+          end
         end
 
         # Return the next lower item in the list.
         def lower_item
           return nil unless in_list?
-          acts_as_list_class.find(:first, :conditions =>
-            "#{scope_condition} AND #{position_column} = #{(send(position_column).to_i + 1).to_s}"
-          )
+          acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+            acts_as_list_class.find(:first, :conditions =>
+              "#{position_column} = #{(send(position_column).to_i + 1).to_s}"
+            )
+          end
         end
 
         # Test if this record is in a list
@@ -193,9 +203,10 @@ module ActiveRecord
 
           # Returns the bottom item
           def bottom_item(except = nil)
-            conditions = scope_condition
-            conditions = "#{conditions} AND #{self.class.primary_key} != #{except.id}" if except
-            acts_as_list_class.find(:first, :conditions => conditions, :order => "#{position_column} DESC")
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+              conditions = except.nil?() ? "" : "#{self.class.primary_key} != #{except.id}" 
+              acts_as_list_class.find(:first, :conditions => conditions, :order => "#{position_column} DESC")
+            end
           end
 
           # Forces item to assume the bottom position in the list.
@@ -210,39 +221,47 @@ module ActiveRecord
 
           # This has the effect of moving all the higher items up one.
           def decrement_positions_on_higher_items(position)
-            acts_as_list_class.update_all(
-              "#{position_column} = (#{position_column} - 1)", "#{scope_condition} AND #{position_column} <= #{position}"
-            )
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+              acts_as_list_class.update_all(
+                "#{position_column} = (#{position_column} - 1)", "#{position_column} <= #{position}"
+              )
+            end
           end
 
           # This has the effect of moving all the lower items up one.
           def decrement_positions_on_lower_items
             return unless in_list?
-            acts_as_list_class.update_all(
-              "#{position_column} = (#{position_column} - 1)", "#{scope_condition} AND #{position_column} > #{send(position_column).to_i}"
-            )
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+              acts_as_list_class.update_all(
+                "#{position_column} = (#{position_column} - 1)", "#{position_column} > #{send(position_column).to_i}"
+              )
+            end
           end
 
           # This has the effect of moving all the higher items down one.
           def increment_positions_on_higher_items
             return unless in_list?
-            acts_as_list_class.update_all(
-              "#{position_column} = (#{position_column} + 1)", "#{scope_condition} AND #{position_column} < #{send(position_column).to_i}"
-            )
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+              acts_as_list_class.update_all(
+                "#{position_column} = (#{position_column} + 1)", "#{position_column} < #{send(position_column).to_i}"
+              )
+            end
           end
 
           # This has the effect of moving all the lower items down one.
           def increment_positions_on_lower_items(position)
-            acts_as_list_class.update_all(
-              "#{position_column} = (#{position_column} + 1)", "#{scope_condition} AND #{position_column} >= #{position}"
-           )
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do
+              acts_as_list_class.update_all(
+                "#{position_column} = (#{position_column} + 1)", "#{position_column} >= #{position}"
+             )
+            end
           end
 
           # Increments position (<tt>position_column</tt>) of all items in the list.
           def increment_positions_on_all_items
-            acts_as_list_class.update_all(
-              "#{position_column} = (#{position_column} + 1)",  "#{scope_condition}"
-            )
+            acts_as_list_class.with_acts_as_list_scope(scope_condition) do            
+              acts_as_list_class.update_all("#{position_column} = (#{position_column} + 1)")
+            end
           end
 
           def insert_at_position(position)
